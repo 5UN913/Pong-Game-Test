@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Retro Arcade Pong - Smart AI</title>
+    <!-- 引入经典街机像素字体 -->
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        /* 重置基础样式 */
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: #000000; /* 纯黑背景 */
+            color: #ffffff;
+            font-family: 'Press Start 2P', monospace; /* 像素字体 */
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        .game-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+            max-width: 800px;
+            padding: 10px;
+        }
+
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 20px;
+            color: #ffffff;
+            text-align: center;
+            letter-spacing: 4px;
+        }
+
+        /* 难度选择器样式 */
+        .difficulty-container {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 15px;
+        }
+
+        .diff-btn {
+            background: #000;
+            color: #fff;
+            border: 2px solid #fff;
+            padding: 10px 15px;
+            font-family: 'Press Start 2P', monospace;
+            font-size: 0.6rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .diff-btn:hover {
+            background: #fff;
+            color: #000;
+        }
+
+        .diff-btn.active {
+            background: #fff;
+            color: #000;
+            box-shadow: 4px 4px 0px #555;
+        }
+
+        /* 画布容器 */
+        .canvas-container {
+            width: 100%;
+            position: relative;
+            border: 4px solid #ffffff; 
+            background-color: #000000;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+            touch-action: none; 
+            image-rendering: pixelated; /* 强制像素化渲染 */
+        }
+
+        .instructions {
+            margin-top: 20px;
+            color: #aaaaaa;
+            font-size: 0.6rem;
+            text-align: center;
+            line-height: 2;
+        }
+
+        .highlight {
+            color: #ffffff;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="game-wrapper">
+        <h1>PONG</h1>
+        
+        <!-- 难度切换按钮 -->
+        <div class="difficulty-container">
+            <button class="diff-btn" onclick="setDifficulty('easy')" id="btn-easy">EASY</button>
+            <button class="diff-btn active" onclick="setDifficulty('medium')" id="btn-medium">MEDIUM</button>
+            <button class="diff-btn" onclick="setDifficulty('hard')" id="btn-hard">HARD</button>
+        </div>
+
+        <div class="canvas-container">
+            <canvas id="pongCanvas" width="800" height="500"></canvas>
+        </div>
+
+        <div class="instructions">
+            <p>CONTROL: <span class="highlight">MOUSE/TOUCH</span></p>
+            <p>SMART AI ENGAGED</p>
+        </div>
+    </div>
+
+    <script>
+        // 难度配置：增加预测偏差和反应平滑度
+        const difficultySettings = {
+            easy: { aiLevel: 0.04, ballSpeed: 5, errorMargin: 50 },
+            medium: { aiLevel: 0.07, ballSpeed: 7, errorMargin: 25 },
+            hard: { aiLevel: 0.12, ballSpeed: 10, errorMargin: 5 }
+        };
+
+        let currentDifficulty = 'medium';
+
+        function setDifficulty(level) {
+            currentDifficulty = level;
+            document.querySelectorAll('.diff-btn').forEach(btn => btn.classList.remove('active'));
+            document.getElementById(`btn-${level}`).classList.add('active');
+            window.gameParams.aiLevel = difficultySettings[level].aiLevel;
+            window.gameParams.initialBallSpeed = difficultySettings[level].ballSpeed;
+            window.gameParams.errorMargin = difficultySettings[level].errorMargin;
+        }
+
+        window.onload = function() {
+            const canvas = document.getElementById("pongCanvas");
+            const ctx = canvas.getContext("2d");
+
+            window.gameParams = {
+                aiLevel: difficultySettings[currentDifficulty].aiLevel,
+                initialBallSpeed: difficultySettings[currentDifficulty].ballSpeed,
+                errorMargin: difficultySettings[currentDifficulty].errorMargin
+            };
+
+            const user = {
+                x: 20,
+                y: canvas.height / 2 - 40,
+                width: 15,
+                height: 80,
+                color: "#ffffff",
+                score: 0
+            };
+
+            const com = {
+                x: canvas.width - 35, 
+                y: canvas.height / 2 - 40,
+                width: 15,
+                height: 80,
+                color: "#ffffff",
+                score: 0,
+                targetY: canvas.height / 2 - 40 // AI 的目标预测位置
+            };
+
+            const ball = {
+                x: canvas.width / 2,
+                y: canvas.height / 2,
+                radius: 10,
+                speed: window.gameParams.initialBallSpeed,
+                velocityX: window.gameParams.initialBallSpeed,
+                velocityY: window.gameParams.initialBallSpeed,
+                color: "#ffffff"
+            };
+
+            const net = {
+                x: canvas.width / 2 - 4,
+                y: 0,
+                width: 8,
+                height: 15,
+                color: "#ffffff"
+            };
+
+            function drawRect(x, y, w, h, color) {
+                ctx.fillStyle = color;
+                ctx.fillRect(x, y, w, h);
+            }
+
+            function drawText(text, x, y, color) {
+                ctx.fillStyle = color;
+                ctx.font = "40px 'Press Start 2P', monospace";
+                ctx.fillText(text, x, y);
+            }
+
+            function drawNet() {
+                for (let i = 0; i <= canvas.height; i += 30) {
+                    drawRect(net.x, net.y + i, net.width, net.height, net.color);
+                }
+            }
+
+            function getClientY(evt) {
+                if (evt.touches && evt.touches.length > 0) return evt.touches[0].clientY;
+                return evt.clientY;
+            }
+
+            function movePaddle(evt) {
+                let rect = canvas.getBoundingClientRect();
+                let clientY = getClientY(evt);
+                if (clientY !== undefined) {
+                    let scaleY = canvas.height / rect.height;
+                    user.y = (clientY - rect.top) * scaleY - user.height / 2;
+                    if (user.y < 0) user.y = 0;
+                    else if (user.y + user.height > canvas.height) user.y = canvas.height - user.height;
+                }
+            }
+
+            canvas.addEventListener("mousemove", movePaddle);
+            canvas.addEventListener("touchmove", function(evt) {
+                evt.preventDefault(); 
+                movePaddle(evt);
+            }, { passive: false });
+
+            function resetBall() {
+                ball.x = canvas.width / 2;
+                ball.y = canvas.height / 2;
+                ball.speed = window.gameParams.initialBallSpeed;
+                ball.velocityX = (ball.velocityX > 0 ? -1 : 1) * ball.speed;
+                ball.velocityY = (Math.random() > 0.5 ? 1 : -1) * ball.speed;
+                // 重置 AI 目标到中心
+                com.targetY = canvas.height / 2 - com.height / 2;
+            }
+
+            function collision(b, p) {
+                return b.x + b.radius > p.x && b.y - b.radius < p.y + p.height && b.x - b.radius < p.x + p.width && b.y + b.radius > p.y;
+            }
+
+            function update() {
+                ball.x += ball.velocityX;
+                ball.y += ball.velocityY;
+
+                // --- 智能 AI 逻辑 ---
+                // 1. 预测逻辑：只有当球飞向 AI 时，AI 才会积极预测落点
+                if (ball.velocityX > 0) {
+                    // 模拟反应时间：AI 不会立刻知道球的最终落点，而是带有随机偏差
+                    // 随着球靠近，偏差减小
+                    let distToCom = com.x - ball.x;
+                    let predictionError = (Math.random() - 0.5) * window.gameParams.errorMargin * (distToCom / canvas.width);
+                    com.targetY = ball.y + predictionError - com.height / 2;
+                } else {
+                    // 球飞向玩家时，AI 回到中心或在小范围内游荡
+                    com.targetY = (canvas.height / 2 - com.height / 2) + Math.sin(Date.now() / 500) * 20;
+                }
+
+                // 2. 平滑移动：AI 的当前位置向目标位置靠拢，受到 aiLevel（反应速度）限制
+                com.y += (com.targetY - com.y) * window.gameParams.aiLevel;
+                
+                // 边界限制
+                if (com.y < 0) com.y = 0;
+                else if (com.y + com.height > canvas.height) com.y = canvas.height - com.height;
+
+                // 墙壁反弹
+                if (ball.y + ball.radius > canvas.height || ball.y - ball.radius < 0) {
+                    ball.velocityY = -ball.velocityY;
+                }
+
+                let player = (ball.x < canvas.width / 2) ? user : com;
+
+                if (collision(ball, player)) {
+                    let collidePoint = ball.y - (player.y + player.height / 2);
+                    collidePoint = collidePoint / (player.height / 2);
+                    let angleRad = (Math.PI / 4) * collidePoint;
+                    let direction = (ball.x < canvas.width / 2) ? 1 : -1;
+
+                    ball.velocityX = direction * ball.speed * Math.cos(angleRad);
+                    ball.velocityY = ball.speed * Math.sin(angleRad);
+                    ball.speed += 0.4;
+                }
+
+                if (ball.x - ball.radius < 0) {
+                    com.score++;
+                    resetBall();
+                } else if (ball.x + ball.radius > canvas.width) {
+                    user.score++;
+                    resetBall();
+                }
+            }
+
+            function render() {
+                drawRect(0, 0, canvas.width, canvas.height, "#000000");
+                drawNet();
+                drawText(user.score, canvas.width / 4, canvas.height / 5, user.color);
+                drawText(com.score, 3 * canvas.width / 4, canvas.height / 5, com.color);
+                drawRect(user.x, user.y, user.width, user.height, user.color);
+                drawRect(com.x, com.y, com.width, com.height, com.color);
+                drawRect(ball.x - ball.radius, ball.y - ball.radius, ball.radius * 2, ball.radius * 2, ball.color);
+            }
+
+            function gameLoop() {
+                update();
+                render();
+                requestAnimationFrame(gameLoop);
+            }
+
+            gameLoop();
+        };
+    </script>
+</body>
+</html>
